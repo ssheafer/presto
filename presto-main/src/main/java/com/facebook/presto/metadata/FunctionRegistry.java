@@ -67,6 +67,7 @@ import com.facebook.presto.type.BooleanOperators;
 import com.facebook.presto.type.DateOperators;
 import com.facebook.presto.type.DateTimeOperators;
 import com.facebook.presto.type.DoubleOperators;
+import com.facebook.presto.type.HyperLogLogOperators;
 import com.facebook.presto.type.IntervalDayTimeOperators;
 import com.facebook.presto.type.IntervalYearMonthOperators;
 import com.facebook.presto.type.SqlType;
@@ -299,7 +300,8 @@ public class FunctionRegistry
                 .scalar(IntervalYearMonthOperators.class)
                 .scalar(TimeWithTimeZoneOperators.class)
                 .scalar(TimestampWithTimeZoneOperators.class)
-                .scalar(DateTimeOperators.class);
+                .scalar(DateTimeOperators.class)
+                .scalar(HyperLogLogOperators.class);
 
         if (experimentalSyntaxEnabled) {
             builder.approximateAggregate("avg", VARCHAR, ImmutableList.of(BIGINT), VARCHAR, LONG_APPROXIMATE_AVERAGE_AGGREGATION)
