@@ -305,4 +305,11 @@ public class DriverContext
             }
         };
     }
+
+    // hack for index joins
+    @Deprecated
+    public Executor getExecutor()
+    {
+        return executor;
+    }
 }
