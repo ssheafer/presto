@@ -440,8 +440,8 @@ exprPrimary
 
 qnameOrFunction
     : (qname -> qname)
-      ( ('(' '*' ')' over?                          -> ^(FUNCTION_CALL $qnameOrFunction over?))
-      | ('(' setQuant? expr? (',' expr)* ')' over?  -> ^(FUNCTION_CALL $qnameOrFunction over? setQuant? expr*))
+      ( '(' '*' ')' over?                            -> ^(FUNCTION_CALL $qnameOrFunction over?)
+      | '(' (setQuant? expr (',' expr)*)? ')' over?  -> ^(FUNCTION_CALL $qnameOrFunction over? setQuant? expr*)
       )?
     ;
 
