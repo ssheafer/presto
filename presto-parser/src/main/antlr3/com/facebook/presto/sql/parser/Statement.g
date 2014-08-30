@@ -226,11 +226,6 @@ simpleQuery
       havingClause?
     ;
 
-restrictedSelectStmt
-    : selectClause
-      fromClause
-    ;
-
 approximateClause
     : APPROXIMATE AT number CONFIDENCE -> ^(APPROXIMATE number)
     ;
