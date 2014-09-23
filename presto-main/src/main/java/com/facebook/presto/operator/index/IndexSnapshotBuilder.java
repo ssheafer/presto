@@ -89,6 +89,11 @@ public class IndexSnapshotBuilder
         this.missingKeys = missingKeysIndex.createLookupSource(this.missingKeysChannels);
     }
 
+    public List<Type> getOutputTypes()
+    {
+        return outputTypes;
+    }
+
     public long getMemoryInBytes()
     {
         return memoryInBytes;

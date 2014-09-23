@@ -126,6 +126,11 @@ public final class InMemoryJoinHash
         return result;
     }
 
+    @Override
+    public void close()
+    {
+    }
+
     private int hashPosition(int position)
     {
         long pageAddress = addresses.getLong(position);

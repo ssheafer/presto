@@ -55,6 +55,7 @@ import com.facebook.presto.operator.ValuesOperator.ValuesOperatorFactory;
 import com.facebook.presto.operator.WindowFunctionDefinition;
 import com.facebook.presto.operator.WindowOperator.WindowOperatorFactory;
 import com.facebook.presto.operator.index.FieldSetFilteringRecordSet;
+import com.facebook.presto.operator.index.IndexBuildDriverFactoryProvider;
 import com.facebook.presto.operator.index.IndexJoinLookupStats;
 import com.facebook.presto.operator.index.IndexLookupSourceSupplier;
 import com.facebook.presto.operator.index.IndexSourceOperator;
@@ -137,7 +138,6 @@ import static com.facebook.presto.operator.DistinctLimitOperator.DistinctLimitOp
 import static com.facebook.presto.operator.TableCommitOperator.TableCommitOperatorFactory;
 import static com.facebook.presto.operator.TableCommitOperator.TableCommitter;
 import static com.facebook.presto.operator.TableWriterOperator.TableWriterOperatorFactory;
-import static com.facebook.presto.operator.index.PagesIndexBuilderOperator.PagesIndexBuilderOperatorFactory;
 import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.getExpressionTypes;
 import static com.facebook.presto.sql.analyzer.ExpressionAnalyzer.getExpressionTypesFromInput;
 import static com.facebook.presto.sql.planner.plan.IndexJoinNode.EquiJoinClause.indexGetter;
@@ -954,24 +954,15 @@ public class LocalExecutionPlanner
             PhysicalOperation indexSource = node.getIndexSource().accept(this, indexContext);
             List<Integer> indexChannels = getChannelsForSymbols(indexSymbols, indexSource.getLayout());
 
-            PagesIndexBuilderOperatorFactory pagesIndexOutput = new PagesIndexBuilderOperatorFactory(
+            IndexBuildDriverFactoryProvider indexBuildDriverFactoryProvider = new IndexBuildDriverFactoryProvider(
                     indexContext.getNextOperatorId(),
-                    indexSource.getTypes()
-            );
-
-            DriverFactory indexBuildDriverFactory = new DriverFactory(
                     indexContext.isInputDriver(),
-                    false,
-                    ImmutableList.<OperatorFactory>builder()
-                            .addAll(indexSource.getOperatorFactories())
-                            .add(pagesIndexOutput)
-                            .build());
+                    indexSource.getOperatorFactories());
 
             IndexLookupSourceSupplier indexLookupSourceSupplier = new IndexLookupSourceSupplier(
                     indexChannels,
                     indexSource.getTypes(),
-                    indexBuildDriverFactory,
-                    pagesIndexOutput,
+                    indexBuildDriverFactoryProvider,
                     maxIndexMemorySize,
                     indexJoinLookupStats);
 
