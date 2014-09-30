@@ -32,12 +32,15 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 
 import static com.facebook.presto.operator.AggregationFunctionDefinition.aggregation;
 import static com.facebook.presto.operator.OperatorAssertion.assertOperatorEqualsIgnoreOrder;
+import static com.facebook.presto.operator.OperatorAssertion.toMaterializedResult;
 import static com.facebook.presto.operator.OperatorAssertion.toPages;
 import static com.facebook.presto.operator.RowPagesBuilder.rowPagesBuilder;
 import static com.facebook.presto.operator.aggregation.AverageAggregations.LONG_AVERAGE;
@@ -55,8 +58,10 @@ import static com.facebook.presto.testing.MaterializedResult.resultBuilder;
 import static io.airlift.concurrent.Threads.daemonThreadsNamed;
 import static io.airlift.slice.SizeOf.SIZE_OF_DOUBLE;
 import static io.airlift.slice.SizeOf.SIZE_OF_LONG;
+import static io.airlift.testing.Assertions.assertEqualsIgnoreOrder;
 import static java.util.concurrent.Executors.newCachedThreadPool;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertTrue;
 
 @Test(singleThreaded = true)
 public class TestHashAggregationOperator
@@ -237,5 +242,68 @@ public class TestHashAggregationOperator
         Operator operator = operatorFactory.createOperator(driverContext);
 
         assertEquals(toPages(operator, input).size(), 2);
+    }
+
+    @Test
+    public void testMultiplePartialFlushes()
+            throws Exception
+    {
+        List<Page> input = rowPagesBuilder(BIGINT)
+                .addSequencePage(500, 0)
+                .addSequencePage(500, 500)
+                .addSequencePage(500, 1000)
+                .addSequencePage(500, 1500)
+                .build();
+
+        HashAggregationOperatorFactory operatorFactory = new HashAggregationOperatorFactory(
+                0,
+                ImmutableList.of(BIGINT),
+                Ints.asList(0),
+                Step.PARTIAL,
+                ImmutableList.of(aggregation(LONG_SUM, ImmutableList.of(0), Optional.<Integer>absent(), Optional.<Integer>absent(), 1.0)),
+                100_000);
+
+        ConnectorSession session = new ConnectorSession("user", "source", "catalog", "schema", UTC_KEY, Locale.ENGLISH, "address", "agent");
+        DriverContext driverContext = new TaskContext(new TaskId("query", "stage", "task"), executor, session, new DataSize(1, Unit.KILOBYTE))
+                .addPipelineContext(true, true)
+                .addDriverContext();
+        Operator operator = operatorFactory.createOperator(driverContext);
+
+        List<Page> expectedPages = rowPagesBuilder(BIGINT, BIGINT)
+                .addSequencePage(2000, 0, 0)
+                .build();
+        MaterializedResult expected = resultBuilder(driverContext.getSession(), BIGINT, BIGINT)
+                .pages(expectedPages)
+                .build();
+
+        Iterator<Page> inputIterator = input.iterator();
+
+        // Fill up the aggregation
+        while (operator.needsInput() && inputIterator.hasNext()) {
+            operator.addInput(inputIterator.next());
+        }
+
+        // Drain the output (partial flush)
+        List<Page> outputPages = new ArrayList<>();
+        while (true) {
+            Page output = operator.getOutput();
+            if (output == null) {
+                break;
+            }
+            outputPages.add(output);
+        }
+
+        // There should be some pages that were drained
+        assertTrue(!outputPages.isEmpty());
+
+        // The operator need input again since this was a partial flush
+        assertTrue(operator.needsInput());
+
+        // Now, drive the operator to completion
+        outputPages.addAll(toPages(operator, inputIterator));
+
+        MaterializedResult actual = toMaterializedResult(operator.getOperatorContext().getSession(), operator.getTypes(), outputPages);
+        assertEquals(actual.getTypes(), expected.getTypes());
+        assertEqualsIgnoreOrder(actual.getMaterializedRows(), expected.getMaterializedRows());
     }
 }
