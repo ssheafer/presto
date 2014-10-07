@@ -126,7 +126,6 @@ public class StreamingIndexedData
         checkState(currentPage != null, "getJoinPosition not called first");
         int intPosition = Ints.checkedCast(position);
         for (int i = 0; i < outputTypes.size(); i++) {
-            Type type = outputTypes.get(i);
             Block block = currentPage.getBlock(i);
             BlockBuilder blockBuilder = pageBuilder.getBlockBuilder(i + outputChannelOffset);
             block.appendTo(intPosition, blockBuilder);
