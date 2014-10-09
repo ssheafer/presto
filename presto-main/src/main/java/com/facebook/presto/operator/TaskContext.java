@@ -80,12 +80,22 @@ public class TaskContext
     public TaskContext(TaskId taskId, Executor executor, ConnectorSession session, DataSize maxMemory)
     {
         this(
+                taskId,
+                executor,
+                session,
+                checkNotNull(maxMemory, "maxMemory is null"),
+                true);
+    }
+
+    public TaskContext(TaskId taskId, Executor executor, ConnectorSession session, DataSize maxMemory, boolean cpuTimerEnabled)
+    {
+        this(
                 new TaskStateMachine(checkNotNull(taskId, "taskId is null"), checkNotSameThreadExecutor(executor, "executor is null")),
                 executor,
                 session,
                 checkNotNull(maxMemory, "maxMemory is null"),
                 new DataSize(1, MEGABYTE),
-                true);
+                cpuTimerEnabled);
     }
 
     public TaskContext(TaskStateMachine taskStateMachine, Executor executor, ConnectorSession session, DataSize maxMemory, DataSize operatorPreAllocatedMemory, boolean cpuTimerEnabled)
