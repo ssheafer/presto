@@ -158,14 +158,14 @@ public final class DateTimeFunctions
         return unpackMillisUtc(timestampWithTimeZone) / 1000.0;
     }
 
-    @ScalarFunction(value = "at_time_zone", hidden = true)
+    @ScalarFunction(value = "at_timezone")
     @SqlType(TimeWithTimeZoneType.class)
     public static long timeAtTimeZone(@SqlType(TimeWithTimeZoneType.class) long timeWithTimeZone, @SqlType(VarcharType.class) Slice zoneId)
     {
         return packDateTimeWithZone(unpackMillisUtc(timeWithTimeZone), zoneId.toStringUtf8());
     }
 
-    @ScalarFunction(value = "at_time_zone", hidden = true)
+    @ScalarFunction(value = "at_timezone")
     @SqlType(TimeWithTimeZoneType.class)
     public static long timeAtTimeZone(@SqlType(TimeWithTimeZoneType.class) long timeWithTimeZone, @SqlType(IntervalDayTimeType.class) long zoneOffset)
     {
@@ -177,14 +177,14 @@ public final class DateTimeFunctions
         return packDateTimeWithZone(unpackMillisUtc(timeWithTimeZone), getTimeZoneKeyForOffset(zoneOffsetMinutes));
     }
 
-    @ScalarFunction(value = "at_time_zone", hidden = true)
+    @ScalarFunction(value = "at_timezone")
     @SqlType(TimestampWithTimeZoneType.class)
     public static long timestampAtTimeZone(@SqlType(TimestampWithTimeZoneType.class) long timestampWithTimeZone, @SqlType(VarcharType.class) Slice zoneId)
     {
         return packDateTimeWithZone(unpackMillisUtc(timestampWithTimeZone), zoneId.toStringUtf8());
     }
 
-    @ScalarFunction(value = "at_time_zone", hidden = true)
+    @ScalarFunction(value = "at_timezone")
     @SqlType(TimestampWithTimeZoneType.class)
     public static long timestampAtTimeZone(@SqlType(TimestampWithTimeZoneType.class) long timestampWithTimeZone, @SqlType(IntervalDayTimeType.class) long zoneOffset)
     {
