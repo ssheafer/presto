@@ -64,7 +64,6 @@ import com.facebook.presto.operator.index.IndexBuildDriverFactoryProvider;
 import com.facebook.presto.operator.index.IndexJoinLookupStats;
 import com.facebook.presto.operator.index.IndexLookupSourceSupplier;
 import com.facebook.presto.operator.index.IndexSourceOperator;
-import com.facebook.presto.spi.ConnectorPageSink;
 import com.facebook.presto.spi.Index;
 import com.facebook.presto.spi.PageBuilder;
 import com.facebook.presto.spi.PrestoException;
@@ -1297,14 +1296,11 @@ public class LocalExecutionPlanner
 
             Optional<Integer> sampleWeightChannel = node.getSampleWeightSymbol().map(exchange::symbolToChannel);
 
-            // create the table writer
-            ConnectorPageSink pageSink = getPageSink(node);
-
             List<Integer> inputChannels = node.getColumns().stream()
                     .map(exchange::symbolToChannel)
                     .collect(toImmutableList());
 
-            OperatorFactory operatorFactory = new TableWriterOperatorFactory(context.getNextOperatorId(), pageSink, inputChannels, sampleWeightChannel);
+            OperatorFactory operatorFactory = new TableWriterOperatorFactory(context.getNextOperatorId(), pageSinkManager, node.getTarget(), inputChannels, sampleWeightChannel);
 
             Map<Symbol, Integer> layout = ImmutableMap.<Symbol, Integer>builder()
                     .put(node.getOutputSymbols().get(0), 0)
@@ -1501,18 +1497,6 @@ public class LocalExecutionPlanner
 
             return new PhysicalOperation(operatorFactory, outputMappings.build(), source);
         }
-    }
-
-    private ConnectorPageSink getPageSink(TableWriterNode node)
-    {
-        WriterTarget target = node.getTarget();
-        if (target instanceof CreateHandle) {
-            return pageSinkManager.createPageSink(((CreateHandle) target).getHandle());
-        }
-        if (target instanceof InsertHandle) {
-            return pageSinkManager.createPageSink(((InsertHandle) target).getHandle());
-        }
-        throw new AssertionError("Unhandled target type: " + target.getClass().getName());
     }
 
     public static List<Type> toTypes(List<ProjectionFunction> projections)
