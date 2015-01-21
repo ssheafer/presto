@@ -43,6 +43,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Multimaps;
+import io.airlift.slice.Slice;
 import org.skife.jdbi.v2.Handle;
 import org.skife.jdbi.v2.IDBI;
 import org.skife.jdbi.v2.TransactionCallback;
@@ -74,6 +75,8 @@ import static com.google.common.base.Predicates.not;
 public class RaptorMetadata
         implements ConnectorMetadata
 {
+    private static final Splitter NODE_SHARD_SPLITTER = Splitter.on(':').limit(2);
+
     private final IDBI dbi;
     private final MetadataDao dao;
     private final ShardManager shardManager;
@@ -315,7 +318,7 @@ public class RaptorMetadata
     }
 
     @Override
-    public void commitCreateTable(ConnectorOutputTableHandle outputTableHandle, Collection<String> fragments)
+    public void commitCreateTable(ConnectorOutputTableHandle outputTableHandle, Collection<Slice> fragments)
     {
         final RaptorOutputTableHandle table = checkType(outputTableHandle, RaptorOutputTableHandle.class, "outputTableHandle");
 
@@ -356,7 +359,7 @@ public class RaptorMetadata
     }
 
     @Override
-    public void commitInsert(ConnectorInsertTableHandle insertHandle, Collection<String> fragments)
+    public void commitInsert(ConnectorInsertTableHandle insertHandle, Collection<Slice> fragments)
     {
         RaptorInsertTableHandle handle = checkType(insertHandle, RaptorInsertTableHandle.class, "insertHandle");
         long tableId = handle.getTableId();
@@ -432,11 +435,11 @@ public class RaptorMetadata
         return new RaptorColumnHandle(connectorId, tableColumn.getColumnName(), tableColumn.getColumnId(), tableColumn.getDataType());
     }
 
-    private static List<ShardNode> parseFragments(Collection<String> fragments)
+    private static Iterable<ShardNode> parseFragments(Iterable<Slice> fragments)
     {
         ImmutableList.Builder<ShardNode> shards = ImmutableList.builder();
-        for (String fragment : fragments) {
-            Iterator<String> split = Splitter.on(':').split(fragment).iterator();
+        for (Slice fragment : fragments) {
+            Iterator<String> split = NODE_SHARD_SPLITTER.split(fragment.toStringUtf8()).iterator();
             String nodeId = split.next();
             UUID shardUuid = UUID.fromString(split.next());
             shards.add(new ShardNode(shardUuid, nodeId));
