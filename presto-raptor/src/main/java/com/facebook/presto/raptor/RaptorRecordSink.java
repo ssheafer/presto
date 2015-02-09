@@ -13,8 +13,8 @@
  */
 package com.facebook.presto.raptor;
 
-import com.facebook.presto.raptor.storage.RowSink;
 import com.facebook.presto.raptor.storage.OutputHandle;
+import com.facebook.presto.raptor.storage.RowSink;
 import com.facebook.presto.raptor.storage.StorageManager;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.RecordSink;
@@ -22,7 +22,10 @@ import com.facebook.presto.spi.type.Type;
 import com.google.common.base.Joiner;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
+import io.airlift.slice.Slice;
+import io.airlift.slice.Slices;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -144,11 +147,17 @@ public class RaptorRecordSink
     }
 
     @Override
-    public String commit()
+    public Collection<Slice> commit()
     {
         storageManager.commit(outputHandle);
 
-        return Joiner.on(':').join(nodeId, outputHandle.getShardUuid());
+        return ImmutableList.of(Slices.utf8Slice(Joiner.on(':').join(nodeId, outputHandle.getShardUuid())));
+    }
+
+    @Override
+    public void rollback()
+    {
+        // TODO: clean up open resources
     }
 
     @Override
