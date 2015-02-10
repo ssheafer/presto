@@ -47,7 +47,7 @@ public class TestScanFilterAndProjectOperator
 
     public TestScanFilterAndProjectOperator()
     {
-        executor = newCachedThreadPool(daemonThreadsNamed("test"));
+        executor = newCachedThreadPool(daemonThreadsNamed("test-%s"));
     }
 
     @Test
