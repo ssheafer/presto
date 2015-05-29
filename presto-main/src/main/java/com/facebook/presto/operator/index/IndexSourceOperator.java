@@ -211,4 +211,13 @@ public class IndexSourceOperator
         }
         return delegate.getOutput();
     }
+
+    @Override
+    public void close()
+            throws Exception
+    {
+        if (source != null) {
+            source.close();
+        }
+    }
 }
