@@ -13,14 +13,17 @@
  */
 package com.facebook.presto.operator;
 
+import com.facebook.presto.operator.scalar.CombineHashFunction;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageBuilder;
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.type.AbstractType;
 import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.type.BigintOperators;
 import com.facebook.presto.util.array.LongBigArray;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import io.airlift.slice.Slice;
+import io.airlift.slice.Slices;
 import io.airlift.slice.XxHash64;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -48,6 +51,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static it.unimi.dsi.fastutil.HashCommon.arraySize;
 
 @SuppressWarnings("MethodMayBeStatic")
@@ -60,13 +64,34 @@ import static it.unimi.dsi.fastutil.HashCommon.arraySize;
 public class BenchmarkGroupByHash
 {
     private static final int POSITIONS = 10_000_000;
-    private static final String GROUP_COUNT_STRING = "3000000";
+    private static final String GROUP_COUNT_STRING = "500000";
     private static final int GROUP_COUNT = Integer.parseInt(GROUP_COUNT_STRING);
     private static final int EXPECTED_SIZE = 10_000;
 
     @Benchmark
     @OperationsPerInvocation(POSITIONS)
     public Object groupByHashPreCompute(BenchmarkData data)
+    {
+        GroupByHash groupByHash = new MultiChannelGroupByHash(data.getTypes(), data.getChannels(), data.getHashChannel(), EXPECTED_SIZE, false);
+        data.getPages().forEach(groupByHash::getGroupIds);
+
+        ImmutableList.Builder<Page> pages = ImmutableList.builder();
+        PageBuilder pageBuilder = new PageBuilder(groupByHash.getTypes());
+        for (int groupId = 0; groupId < groupByHash.getGroupCount(); groupId++) {
+            pageBuilder.declarePosition();
+            groupByHash.appendValuesTo(groupId, pageBuilder, 0);
+            if (pageBuilder.isFull()) {
+                pages.add(pageBuilder.build());
+                pageBuilder.reset();
+            }
+        }
+        pages.add(pageBuilder.build());
+        return pageBuilder.build();
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(POSITIONS)
+    public Object baldrGroupByHashPreCompute(BenchmarkDataBaldr data)
     {
         GroupByHash groupByHash = new MultiChannelGroupByHash(data.getTypes(), data.getChannels(), data.getHashChannel(), EXPECTED_SIZE, false);
         data.getPages().forEach(groupByHash::getGroupIds);
@@ -185,6 +210,11 @@ public class BenchmarkGroupByHash
         return groupIds;
     }
 
+    public static double root(double num, double root)
+    {
+        return Math.pow(Math.E, Math.log(num) / root);
+    }
+
     private static List<Page> createPages(int positionCount, int groupCount, List<Type> types, boolean hashEnabled)
     {
         int channelCount = types.size();
@@ -194,15 +224,20 @@ public class BenchmarkGroupByHash
             types = ImmutableList.copyOf(Iterables.concat(types, ImmutableList.of(BIGINT)));
         }
 
+        int partialGroupCount = (int) Math.max(Math.round(root(groupCount, channelCount)), 1);
+        System.out.println("PARTIAL:" + partialGroupCount);
+
         PageBuilder pageBuilder = new PageBuilder(types);
         for (int position = 0; position < positionCount; position++) {
-            int rand = ThreadLocalRandom.current().nextInt(groupCount);
+            long hash = 0;
             pageBuilder.declarePosition();
             for (int numChannel = 0; numChannel < channelCount; numChannel++) {
+                int rand = ThreadLocalRandom.current().nextInt(partialGroupCount);
                 BIGINT.writeLong(pageBuilder.getBlockBuilder(numChannel), rand);
+                hash = CombineHashFunction.getHash(hash, rand);
             }
             if (hashEnabled) {
-                BIGINT.writeLong(pageBuilder.getBlockBuilder(channelCount), BigintOperators.hashCode(rand));
+                BIGINT.writeLong(pageBuilder.getBlockBuilder(channelCount), hash);
             }
             if (pageBuilder.isFull()) {
                 pages.add(pageBuilder.build());
@@ -288,11 +323,11 @@ public class BenchmarkGroupByHash
     @State(Scope.Thread)
     public static class BenchmarkData
     {
-        @Param({ "1", "5", "10", "15", "20" })
+        @Param({ "1", "2", "3", "4"})
         private int channelCount = 1;
 
         // todo add more group counts when JMH support programmatic ability to set OperationsPerInvocation
-        @Param(GROUP_COUNT_STRING)
+        @Param({"250000", "500000", "1000000", "2000000", "4000000"})
         private int groupCount = GROUP_COUNT;
 
         @Param({"true", "false"})
@@ -336,6 +371,126 @@ public class BenchmarkGroupByHash
         }
     }
 
+    @SuppressWarnings("FieldMayBeFinal")
+    @State(Scope.Thread)
+    public static class BenchmarkDataBaldr
+    {
+        private List<Page> pages;
+        private int[] channels = new int[2];
+
+        @Setup
+        public void setup()
+        {
+            pages = createBaldrPages(POSITIONS);
+            channels = new int[2];
+            for (int i = 0; i < 2; i++) {
+                channels[i] = i;
+            }
+        }
+
+        public List<Page> getPages()
+        {
+            return pages;
+        }
+
+        public Optional<Integer> getHashChannel()
+        {
+            return Optional.of(2);
+        }
+
+        public List<Type> getTypes()
+        {
+            return ImmutableList.of(BIGINT, VARCHAR);
+        }
+
+        public int[] getChannels()
+        {
+            return channels;
+        }
+    }
+
+    private static List<Page> createBaldrPages(int positionCount)
+    {
+        String[] arr = {
+                "like",
+                "comment",
+                "friend",
+                "post",
+                "reshare",
+                "photo",
+                "feedback_reaction",
+                "contact_field",
+                "fan",
+                "tag",
+                "mention",
+                "sticker",
+                "og_post",
+                "link",
+                "installation",
+                "group_user",
+                "profile",
+                "plan",
+                "photo_album",
+                "follow",
+                "poke",
+                "video",
+                "phone_number",
+                "email",
+                "product_item",
+                "page",
+                "life_event",
+                "streaming_feedback_reaction",
+                "answer",
+                "relationship",
+                "profile_intro_card_bio_record",
+                "family",
+                "discussion_comment",
+                "subscribe_calendar",
+                "mark_safe",
+                "groups",
+                "admin",
+                "file",
+                "anniversary",
+                "shared_album",
+                "media_question_vote",
+                "coupon",
+                "note",
+                "question",
+                "group_doc",
+                "checkin",
+                "scrapbook",
+                "marketplace_post",
+                "fundraiser_donation",
+        };
+
+        ImmutableList<AbstractType> types = ImmutableList.of(BIGINT, VARCHAR);
+
+        ImmutableList.Builder<Page> pages = ImmutableList.builder();
+        types = ImmutableList.copyOf(Iterables.concat(types, ImmutableList.of(BIGINT)));
+
+        PageBuilder pageBuilder = new PageBuilder(types);
+        for (int position = 0; position < positionCount; position++) {
+            long hash = 0;
+            pageBuilder.declarePosition();
+
+            int rand = ThreadLocalRandom.current().nextInt(250_000);
+            BIGINT.writeLong(pageBuilder.getBlockBuilder(0), rand);
+            hash = CombineHashFunction.getHash(hash, rand);
+
+            Slice slice = Slices.utf8Slice(arr[ThreadLocalRandom.current().nextInt(arr.length)]);
+            VARCHAR.writeSlice(pageBuilder.getBlockBuilder(1), slice);
+            hash = CombineHashFunction.getHash(hash, XxHash64.hash(slice));
+
+            BIGINT.writeLong(pageBuilder.getBlockBuilder(2), hash);
+            if (pageBuilder.isFull()) {
+                pages.add(pageBuilder.build());
+                pageBuilder.reset();
+            }
+        }
+        pages.add(pageBuilder.build());
+        return pages.build();
+    }
+
     public static void main(String[] args)
             throws RunnerException
     {
@@ -351,7 +506,10 @@ public class BenchmarkGroupByHash
 
         Options options = new OptionsBuilder()
                 .verbosity(VerboseMode.NORMAL)
-                .include(".*" + BenchmarkGroupByHash.class.getSimpleName() + ".*")
+                .include(".*" + BenchmarkGroupByHash.class.getSimpleName() + ".*roupByHashPreCompute")
+                .param("hashEnabled", "true")
+                .warmupIterations(1)
+                .measurementIterations(1)
                 .build();
         new Runner(options).run();
     }
