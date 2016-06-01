@@ -17,6 +17,8 @@ import com.facebook.presto.operator.scalar.CombineHashFunction;
 import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PageBuilder;
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.block.DictionaryBlock;
+import com.facebook.presto.spi.block.DictionaryId;
 import com.facebook.presto.spi.type.AbstractType;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.util.array.LongBigArray;
@@ -50,14 +52,16 @@ import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
+import static com.facebook.presto.spi.block.DictionaryId.randomDictionaryId;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
+import static io.airlift.slice.Slices.wrappedIntArray;
 import static it.unimi.dsi.fastutil.HashCommon.arraySize;
 
 @SuppressWarnings("MethodMayBeStatic")
 @State(Scope.Thread)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
-@Fork(2)
+@Fork(4)
 @Warmup(iterations = 10, time = 500, timeUnit = TimeUnit.MILLISECONDS)
 @Measurement(iterations = 10, time = 500, timeUnit = TimeUnit.MILLISECONDS)
 @BenchmarkMode(Mode.AverageTime)
@@ -72,21 +76,9 @@ public class BenchmarkGroupByHash
     @OperationsPerInvocation(POSITIONS)
     public Object groupByHashPreCompute(BenchmarkData data)
     {
-        GroupByHash groupByHash = new MultiChannelGroupByHash(data.getTypes(), data.getChannels(), data.getHashChannel(), EXPECTED_SIZE, false);
+        GroupByHash groupByHash = new MultiChannelGroupByHash(data.getTypes(), data.getChannels(), data.getHashChannel(), EXPECTED_SIZE, true);
         data.getPages().forEach(groupByHash::getGroupIds);
-
-        ImmutableList.Builder<Page> pages = ImmutableList.builder();
-        PageBuilder pageBuilder = new PageBuilder(groupByHash.getTypes());
-        for (int groupId = 0; groupId < groupByHash.getGroupCount(); groupId++) {
-            pageBuilder.declarePosition();
-            groupByHash.appendValuesTo(groupId, pageBuilder, 0);
-            if (pageBuilder.isFull()) {
-                pages.add(pageBuilder.build());
-                pageBuilder.reset();
-            }
-        }
-        pages.add(pageBuilder.build());
-        return pageBuilder.build();
+        return null;
     }
 
     @Benchmark
@@ -217,6 +209,7 @@ public class BenchmarkGroupByHash
 
     private static List<Page> createPages(int positionCount, int groupCount, List<Type> types, boolean hashEnabled)
     {
+        Encoder encoder = new Encoder();
         int channelCount = types.size();
 
         ImmutableList.Builder<Page> pages = ImmutableList.builder();
@@ -233,7 +226,8 @@ public class BenchmarkGroupByHash
             pageBuilder.declarePosition();
             for (int numChannel = 0; numChannel < channelCount; numChannel++) {
                 int rand = ThreadLocalRandom.current().nextInt(partialGroupCount);
-                BIGINT.writeLong(pageBuilder.getBlockBuilder(numChannel), rand);
+                String s = Integer.toString(rand);
+                VARCHAR.writeSlice(pageBuilder.getBlockBuilder(numChannel), Slices.utf8Slice(s.substring(0, Math.min(4, s.length()))));
                 hash = CombineHashFunction.getHash(hash, rand);
             }
             if (hashEnabled) {
@@ -246,6 +240,50 @@ public class BenchmarkGroupByHash
         }
         pages.add(pageBuilder.build());
         return pages.build();
+    }
+
+    private static class Encoder
+    {
+        private final MultiChannelGroupByHash groupByHash = new MultiChannelGroupByHash(ImmutableList.of(VARCHAR), new int[] {0}, Optional.empty(), 100, true);
+        private int lastGroupId = -1;
+        private Block dictionary;
+        private DictionaryId dictionaryId;
+
+        private Page buildPage(PageBuilder pageBuilder)
+        {
+            Page page = pageBuilder.build();
+            Block[] blocks = new Block[page.getChannelCount()];
+            for (int i = 0; i < page.getChannelCount(); i++) {
+                blocks[i] = createDictionaryBlock(page.getBlock(i));
+            }
+            return new Page(blocks);
+        }
+
+        private Block createDictionaryBlock(Block block)
+        {
+            GroupByIdBlock groupIds = groupByHash.getGroupIds(new Page(block));
+
+            int[] ints = new int[groupIds.getPositionCount()];
+            for (int i = 0; i < groupIds.getPositionCount(); i++) {
+                ints[i] = (int) BIGINT.getLong(groupIds, i);
+            }
+
+            if (lastGroupId == groupByHash.getGroupCount() && false) {
+                return new DictionaryBlock(block.getPositionCount(), this.dictionary, wrappedIntArray(ints), dictionaryId);
+            }
+            else {
+                PageBuilder pageBuilder = new PageBuilder(100, ImmutableList.of(VARCHAR));
+                for (int i = 0; i < groupByHash.getGroupCount(); i++) {
+                    pageBuilder.declarePosition();
+                    groupByHash.appendValuesTo(i, pageBuilder, 0);
+                }
+                Page build = pageBuilder.build();
+                this.dictionary = build.getBlock(0);
+                this.lastGroupId = groupByHash.getGroupCount();
+                this.dictionaryId = randomDictionaryId();
+                return new DictionaryBlock(block.getPositionCount(), this.dictionary, wrappedIntArray(ints), dictionaryId);
+            }
+        }
     }
 
     @SuppressWarnings("FieldMayBeFinal")
@@ -341,9 +379,9 @@ public class BenchmarkGroupByHash
         @Setup
         public void setup()
         {
-            pages = createPages(POSITIONS, groupCount, Collections.<Type>nCopies(channelCount, BIGINT), hashEnabled);
+            pages = createPages(POSITIONS, groupCount, Collections.<Type>nCopies(channelCount, VARCHAR), hashEnabled);
             hashChannel = hashEnabled ? Optional.of(channelCount) : Optional.empty();
-            types = Collections.<Type>nCopies(channelCount, BIGINT);
+            types = Collections.<Type>nCopies(channelCount, VARCHAR);
             channels = new int[channelCount];
             for (int i = 0; i < channelCount; i++) {
                 channels[i] = i;
@@ -494,22 +532,22 @@ public class BenchmarkGroupByHash
     public static void main(String[] args)
             throws RunnerException
     {
-        // assure the benchmarks are valid before running
+//        // assure the benchmarks are valid before running
         BenchmarkData data = new BenchmarkData();
         data.setup();
         new BenchmarkGroupByHash().groupByHashPreCompute(data);
-        new BenchmarkGroupByHash().addPagePreCompute(data);
-
-        SingleChannelBenchmarkData singleChannelBenchmarkData = new SingleChannelBenchmarkData();
-        singleChannelBenchmarkData.setup();
-        new BenchmarkGroupByHash().bigintGroupByHash(singleChannelBenchmarkData);
+//        new BenchmarkGroupByHash().addPagePreCompute(data);
+//
+//        SingleChannelBenchmarkData singleChannelBenchmarkData = new SingleChannelBenchmarkData();
+//        singleChannelBenchmarkData.setup();
+//        new BenchmarkGroupByHash().bigintGroupByHash(singleChannelBenchmarkData);
 
         Options options = new OptionsBuilder()
                 .verbosity(VerboseMode.NORMAL)
                 .include(".*" + BenchmarkGroupByHash.class.getSimpleName() + ".*roupByHashPreCompute")
                 .param("hashEnabled", "true")
-                .warmupIterations(1)
-                .measurementIterations(1)
+                .warmupIterations(3)
+                .measurementIterations(3)
                 .build();
         new Runner(options).run();
     }
