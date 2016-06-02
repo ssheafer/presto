@@ -14,20 +14,46 @@
 package com.facebook.presto.spi.type;
 
 import com.facebook.presto.spi.ConnectorSession;
+import com.facebook.presto.spi.block.BigintBlockBuilder;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
+import com.facebook.presto.spi.block.BlockBuilderStatus;
 
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
-import static io.airlift.slice.SizeOf.SIZE_OF_LONG;
 
 public final class BigintType
-        extends AbstractFixedWidthType
+        extends AbstractType
+        implements FixedWidthType
 {
     public static final BigintType BIGINT = new BigintType();
 
     private BigintType()
     {
-        super(parseTypeSignature(StandardTypes.BIGINT), long.class, SIZE_OF_LONG);
+        super(parseTypeSignature(StandardTypes.BIGINT), long.class);
+    }
+
+    @Override
+    public int getFixedSize()
+    {
+        return Long.BYTES;
+    }
+
+    @Override
+    public BlockBuilder createFixedSizeBlockBuilder(int positionCount)
+    {
+        return createBlockBuilder(new BlockBuilderStatus(), positionCount);
+    }
+
+    @Override
+    public BlockBuilder createBlockBuilder(BlockBuilderStatus blockBuilderStatus, int expectedEntries, int expectedBytesPerEntry)
+    {
+        return createBlockBuilder(blockBuilderStatus, expectedEntries);
+    }
+
+    @Override
+    public BlockBuilder createBlockBuilder(BlockBuilderStatus blockBuilderStatus, int expectedEntries)
+    {
+        return new BigintBlockBuilder(blockBuilderStatus, expectedEntries);
     }
 
     @Override

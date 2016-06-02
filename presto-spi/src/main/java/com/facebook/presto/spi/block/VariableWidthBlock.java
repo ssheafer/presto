@@ -14,45 +14,57 @@
 package com.facebook.presto.spi.block;
 
 import io.airlift.slice.Slice;
-import io.airlift.slice.SliceOutput;
-import io.airlift.slice.Slices;
 import org.openjdk.jol.info.ClassLayout;
 
 import java.util.List;
 
-import static com.facebook.presto.spi.block.BlockValidationUtil.checkValidPositions;
-import static io.airlift.slice.SizeOf.SIZE_OF_INT;
+import static java.util.Objects.requireNonNull;
 
 public class VariableWidthBlock
         extends AbstractVariableWidthBlock
 {
     private static final int INSTANCE_SIZE = ClassLayout.parseClass(VariableWidthBlock.class).instanceSize();
 
+    private final int positionOffset;
     private final int positionCount;
-    private final Slice slice;
-    private final Slice offsets;
-    private final Slice valueIsNull;
+    private final DynamicByteArray bytes;
+    private final DynamicIntArray offsets;
+    private final DynamicBooleanArray valueIsNull;
 
-    public VariableWidthBlock(int positionCount, Slice slice, Slice offsets, Slice valueIsNull)
+    public VariableWidthBlock(int positionOffset, int positionCount, DynamicByteArray bytes, DynamicIntArray offsets, DynamicBooleanArray valueIsNull)
     {
+        this.positionOffset = positionOffset;
         this.positionCount = positionCount;
-        this.slice = slice;
+        this.bytes = requireNonNull(bytes, "bytes is null");
+        this.offsets = requireNonNull(offsets, "offsets is null");;
+        this.valueIsNull = requireNonNull(valueIsNull, "valueIsNull is null");
 
-        if (offsets.length() < (positionCount + 1) * SIZE_OF_INT) {
-            throw new IllegalArgumentException("offsets length is less than positionCount");
+        if (positionOffset < 0) {
+            throw new IllegalArgumentException("positionOffset must be >= 0: " + positionOffset);
         }
-        this.offsets = offsets;
+        if (positionCount < 0) {
+            throw new IllegalArgumentException("positionCount must be >= 0: " + positionCount);
+        }
+        if (offsets.size() < positionOffset + positionCount + 1) {
+            throw new IllegalArgumentException("region wider than available offsets");
+        }
+        if (valueIsNull.size() < positionOffset + positionCount) {
+            throw new IllegalArgumentException("region wider than available valueIsNull");
+        }
+        if (bytes.size() < offsets.get(positionOffset + positionCount)) {
+            throw new IllegalArgumentException("region wider than available bytes");
+        }
+    }
 
-        if (valueIsNull.length() < positionCount) {
-            throw new IllegalArgumentException("valueIsNull length is less than positionCount");
-        }
-        this.valueIsNull = valueIsNull;
+    public VariableWidthBlock(DynamicByteArray bytes, DynamicIntArray offsets, DynamicBooleanArray valueIsNull)
+    {
+        this(0, valueIsNull.size(), bytes, offsets, valueIsNull);
     }
 
     @Override
     protected final int getPositionOffset(int position)
     {
-        return offsets.getInt(position * SIZE_OF_INT);
+        return offsets.get(positionOffset + position);
     }
 
     @Override
@@ -64,7 +76,7 @@ public class VariableWidthBlock
     @Override
     protected boolean isEntryNull(int position)
     {
-        return valueIsNull.getByte(position) != 0;
+        return valueIsNull.get(positionOffset + position);
     }
 
     @Override
@@ -76,92 +88,73 @@ public class VariableWidthBlock
     @Override
     public int getSizeInBytes()
     {
-        long size = slice.length() + offsets.length() + valueIsNull.length();
-        if (size > Integer.MAX_VALUE) {
-            return Integer.MAX_VALUE;
-        }
-        return (int) size;
+        long byteSize = bytes.getByteSize() + offsets.getByteSize() + valueIsNull.getByteSize();
+        return byteSize > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) byteSize;
     }
 
     @Override
     public int getRetainedSizeInBytes()
     {
-        long size = INSTANCE_SIZE + slice.getRetainedSize() + offsets.getRetainedSize() + valueIsNull.getRetainedSize();
-        if (size > Integer.MAX_VALUE) {
-            return Integer.MAX_VALUE;
-        }
-        return (int) size;
+        long byteSize = INSTANCE_SIZE + bytes.getRetainedByteSize() + offsets.getRetainedByteSize() + valueIsNull.getRetainedByteSize();
+        return byteSize > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) byteSize;
     }
 
     @Override
     public Block copyPositions(List<Integer> positions)
     {
-        checkValidPositions(positions, positionCount);
-
         int finalLength = positions.stream().mapToInt(this::getLength).sum();
-        SliceOutput newSlice = Slices.allocate(finalLength).getOutput();
-        SliceOutput newOffsets = Slices.allocate((positions.size() * SIZE_OF_INT) + SIZE_OF_INT).getOutput();
-        SliceOutput newValueIsNull = Slices.allocate(positions.size()).getOutput();
+        DynamicByteArray newBytes = new DynamicByteArray(finalLength);
+        DynamicIntArray newOffsets = new DynamicIntArray(positions.size() + 1);
+        DynamicBooleanArray newValueIsNull = new DynamicBooleanArray(positions.size());
 
-        newOffsets.appendInt(0);
+        newOffsets.append(0);
         for (int position : positions) {
             boolean isNull = isEntryNull(position);
-            newValueIsNull.appendByte(isNull ? 1 : 0);
+            newValueIsNull.append(isNull);
             if (!isNull) {
-                newSlice.appendBytes(slice.getBytes(getPositionOffset(position), getLength(position)));
+                newBytes.appendBytes(bytes, getPositionOffset(position), getLength(position));
             }
-            newOffsets.appendInt(newSlice.size());
+            newOffsets.append(newBytes.size());
         }
-        return new VariableWidthBlock(positions.size(), newSlice.slice(), newOffsets.slice(), newValueIsNull.slice());
+        return new VariableWidthBlock(newBytes, newOffsets, newValueIsNull);
     }
 
     @Override
     protected Slice getRawSlice(int position)
     {
-        return slice;
+        // TODO: what position?
+        return bytes.getUnderlyingSlice();
     }
 
     @Override
     public Block getRegion(int positionOffset, int length)
     {
-        int positionCount = getPositionCount();
-        if (positionOffset < 0 || length < 0 || positionOffset + length > positionCount) {
-            throw new IndexOutOfBoundsException("Invalid position " + positionOffset + " in block with " + positionCount + " positions");
-        }
-
-        Slice newOffsets = offsets.slice(positionOffset * SIZE_OF_INT, (length + 1) * SIZE_OF_INT);
-        Slice newValueIsNull = valueIsNull.slice(positionOffset, length);
-        return new VariableWidthBlock(length, slice, newOffsets, newValueIsNull);
+        return new VariableWidthBlock(positionOffset, length, bytes, offsets, valueIsNull);
     }
 
     @Override
     public Block copyRegion(int positionOffset, int length)
     {
-        int positionCount = getPositionCount();
-        if (positionOffset < 0 || length < 0 || positionOffset + length > positionCount) {
-            throw new IndexOutOfBoundsException("Invalid position " + positionOffset + " in block with " + positionCount + " positions");
-        }
+        DynamicIntArray newOffsets = new DynamicIntArray(length + 1)
+                .append(0);
 
-        SliceOutput newOffsets = Slices.allocate((length * SIZE_OF_INT) + SIZE_OF_INT).getOutput();
-        newOffsets.appendInt(0);
         int sliceLength = 0;
         for (int position = positionOffset; position < positionOffset + length; position++) {
             sliceLength += getLength(position);
-            newOffsets.appendInt(sliceLength);
+            newOffsets.append(sliceLength);
         }
 
-        Slice newSlice = Slices.copyOf(slice, getPositionOffset(positionOffset), sliceLength);
-        Slice newValueIsNull = Slices.copyOf(valueIsNull, positionOffset, length);
-        return new VariableWidthBlock(length, newSlice, newOffsets.slice(), newValueIsNull);
+        DynamicByteArray newBytes = bytes.copyRegion(getPositionOffset(positionOffset), sliceLength);
+        DynamicBooleanArray newValueIsNull = valueIsNull.copyRegion(positionOffset, length);
+        return new VariableWidthBlock(newBytes, newOffsets, newValueIsNull);
     }
 
     @Override
     public String toString()
     {
-        StringBuilder sb = new StringBuilder("VariableWidthBlock{");
-        sb.append("positionCount=").append(getPositionCount());
-        sb.append(", slice=").append(slice);
-        sb.append('}');
-        return sb.toString();
+        return "VariableWidthBlock{" +
+                "positionCount=" + positionCount +
+                ", bytes=" + bytes +
+                '}';
     }
 }

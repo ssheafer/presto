@@ -14,7 +14,6 @@
 package com.facebook.presto.spi.block;
 
 import io.airlift.slice.Slice;
-import io.airlift.slice.Slices;
 import io.airlift.slice.XxHash64;
 
 public abstract class AbstractVariableWidthBlock
@@ -141,15 +140,16 @@ public abstract class AbstractVariableWidthBlock
     public Block getSingleValueBlock(int position)
     {
         if (isNull(position)) {
-            return new VariableWidthBlock(1, Slices.wrappedBuffer(new byte[0]), Slices.wrappedIntArray(0, 0), Slices.wrappedBooleanArray(true));
+            return new VariableWidthBlock(new DynamicByteArray(0), DynamicIntArray.wrap(0, 0), DynamicBooleanArray.wrap(true));
         }
 
         int offset = getPositionOffset(position);
         int entrySize = getLength(position);
 
-        Slice copy = Slices.copyOf(getRawSlice(position), offset, entrySize);
+        DynamicByteArray newBytes = new DynamicByteArray(entrySize)
+                .appendBytes(getRawSlice(position), offset, entrySize);
 
-        return new VariableWidthBlock(1, copy, Slices.wrappedIntArray(0, copy.length()), Slices.wrappedBooleanArray(false));
+        return new VariableWidthBlock(newBytes, DynamicIntArray.wrap(0, newBytes.size()), DynamicBooleanArray.wrap(false));
     }
 
     @Override
