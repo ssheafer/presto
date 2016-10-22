@@ -45,6 +45,7 @@ public class RaptorOutputTableHandle
     private final OptionalLong distributionId;
     private final OptionalInt bucketCount;
     private final List<RaptorColumnHandle> bucketColumnHandles;
+    private final boolean organized;
 
     @JsonCreator
     public RaptorOutputTableHandle(
@@ -60,6 +61,7 @@ public class RaptorOutputTableHandle
             @JsonProperty("temporalColumnHandle") Optional<RaptorColumnHandle> temporalColumnHandle,
             @JsonProperty("distributionId") OptionalLong distributionId,
             @JsonProperty("bucketCount") OptionalInt bucketCount,
+            @JsonProperty("organized") boolean organized,
             @JsonProperty("bucketColumnHandles") List<RaptorColumnHandle> bucketColumnHandles)
     {
         this.connectorId = requireNonNull(connectorId, "connectorId is null");
@@ -75,6 +77,7 @@ public class RaptorOutputTableHandle
         this.distributionId = requireNonNull(distributionId, "distributionId is null");
         this.bucketCount = requireNonNull(bucketCount, "bucketCount is null");
         this.bucketColumnHandles = ImmutableList.copyOf(requireNonNull(bucketColumnHandles, "bucketColumnHandles is null"));
+        this.organized = organized;
     }
 
     @JsonProperty
@@ -153,6 +156,12 @@ public class RaptorOutputTableHandle
     public List<RaptorColumnHandle> getBucketColumnHandles()
     {
         return bucketColumnHandles;
+    }
+
+    @JsonProperty
+    public boolean isOrganized()
+    {
+        return organized;
     }
 
     @Override

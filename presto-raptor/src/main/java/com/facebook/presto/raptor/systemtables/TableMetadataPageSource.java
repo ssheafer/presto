@@ -44,6 +44,7 @@ import static com.facebook.presto.raptor.RaptorErrorCode.RAPTOR_CORRUPT_METADATA
 import static com.facebook.presto.raptor.util.DatabaseUtil.onDemandDao;
 import static com.facebook.presto.raptor.util.Types.checkType;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
+import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.Iterators.peekingIterator;
@@ -228,6 +229,9 @@ public class TableMetadataPageSource
             else {
                 pageBuilder.getBlockBuilder(6).appendNull();
             }
+
+            // organized
+            BOOLEAN.writeBoolean(pageBuilder.getBlockBuilder(7), tableRow.isOrganized());
 
             if (pageBuilder.isFull()) {
                 flushPage(pageBuilder, pages);
